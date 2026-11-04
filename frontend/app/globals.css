@@ -1,0 +1,8 @@
+@tailwind base; @tailwind components; @tailwind utilities;
+body { background: #EDEFEA; color: #14213D; background-image: linear-gradient(#DDE1DA 1px, transparent 1px), linear-gradient(90deg, #DDE1DA 1px, transparent 1px); background-size: 28px 28px; }
+.sheet { background: #FAFBFA; border: 2px solid #14213D; }
+.mic { transition: transform .15s; }
+.mic.live { animation: pulse 1.2s infinite; }
+@keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(242,194,48,.7); } 100% { box-shadow: 0 0 0 26px rgba(242,194,48,0); } }
+@media (prefers-reduced-motion: reduce) { .mic.live { animation: none; } }
+button:focus-visible, textarea:focus-visible { outline: 3px solid #F2C230; outline-offset: 2px; }
