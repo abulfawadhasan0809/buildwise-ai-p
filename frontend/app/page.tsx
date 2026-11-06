@@ -87,7 +87,7 @@ export default function Home() {
                     <button key={i} onClick={() => setFloor(i)} className={`border-2 border-ink px-3 py-1 ${floor === i ? "bg-plumb" : "bg-white"}`}>Floor {i + 1}</button>))}
                 </div>
               </div>
-              <div className="mx-auto max-w-lg" dangerouslySetInnerHTML={{ __html: proj.floor_plans[floor] }} />
+              <div className="mx-auto max-w-2xl" dangerouslySetInnerHTML={{ __html: proj.floor_plans[floor] }} />
             </div>
 
             <div className="sheet p-4">
