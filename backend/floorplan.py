@@ -1,5 +1,6 @@
 """Architect Agent: architectural-style conceptual plan (walls, doors, windows, stairs) as SVG.
 Layout: west strip | central hall | east strip, entrance at the front (south). Conceptual only."""
+import random
 S = 12  # px per foot
 W_ = {"Living": 3.4, "Dining": 2, "Kitchen": 2.2, "Master Bedroom": 3.2, "Bedroom": 2.6, "Bath": 1,
       "Study": 1.8, "Pooja": .8, "Utility": 1, "Stairs": .01, "Parking": 1}
@@ -36,7 +37,55 @@ def alloc(names, L):
     k = min(1, L / sum(mins)); extra = max(0, L - sum(mins))
     return [m * k + extra * w / sum(ws) for m, w in zip(mins, ws)]
 
-def svg(r, floor=0):
+def fits(st, Lb): return max(sum(MIN.get(n, 8) for n in s) for s in st.values()) <= Lb
+
+def score(st, r, Lb):
+    s, notes, pos = 0, [], {}
+    for k, names in st.items():
+        u = 0
+        for n, l in zip(names, alloc(names, Lb)): pos[n] = (k, (u + l / 2) / Lb); u += l
+        for a, b in zip(names, names[1:]):
+            if {a, b} == {"Kitchen", "Dining"}: s += 3; notes.append("Kitchen sits next to Dining")
+            if "Bath" in (a, b) and ("Bedroom" in a or "Bedroom" in b): s += 1.5
+            if {a, b} == {"Kitchen", "Bath"}: s -= 3
+    if pos.get("Living", ("", 1))[1] < .4: s += 2; notes.append("Living room is near the entrance")
+    if r.get("vastu"):
+        for n, k, ok, msg in (("Kitchen", "E", lambda p: p < .5, "Kitchen in the south-east (Vastu)"), ("Pooja", "E", lambda p: p > .5, "Pooja room in the north-east (Vastu)"),
+                              ("Master Bedroom", "W", lambda p: p < .5, "Master bedroom in the south-west (Vastu)")):
+            if n in pos and pos[n][0] == k and ok(pos[n][1]): s += 3; notes.append(msg)
+    s -= abs(sum(MIN.get(n, 8) for n in st["W"]) - sum(MIN.get(n, 8) for n in st["E"])) * .1
+    return s, notes
+
+def optimize(gs, r, Lb, fallback, tries=250):
+    rng = random.Random(7); best = (score(fallback, r, Lb), fallback)
+    stairs = [g for g in gs if "Stairs" in g]; free = [g for g in gs if "Stairs" not in g]
+    for _ in range(tries):
+        order = [list(g) for g in free]; rng.shuffle(order)
+        for g in order:
+            if "Living" in g: rng.shuffle(g)
+        cand = {"W": [], "E": []}
+        for g in order: cand[rng.choice("WE")] += g
+        for g in stairs: cand["E"] += g
+        if not cand["W"] or not cand["E"] or not fits(cand, Lb): continue
+        sc = score(cand, r, Lb)
+        if sc[0] > best[0][0]: best = (sc, cand)
+    (s, notes), st = best
+    return st, list(dict.fromkeys(notes)), round(max(0, min(100, 60 + s * 4)))
+
+def seg_minus(seg, gaps):
+    (x1, y1), (x2, y2) = seg; horiz = abs(y1 - y2) < 1e-6
+    lo, hi = sorted((x1, x2)) if horiz else sorted((y1, y2)); c = y1 if horiz else x1; cuts = []
+    for a, b in gaps:
+        if horiz and abs(a[1] - c) < .3 and abs(b[1] - c) < .3: cuts.append(sorted((a[0], b[0])))
+        if not horiz and abs(a[0] - c) < .3 and abs(b[0] - c) < .3: cuts.append(sorted((a[1], b[1])))
+    out, cur = [], lo
+    for s, e in sorted(cuts):
+        if s > cur: out.append((cur, s))
+        cur = max(cur, e)
+    if cur < hi: out.append((cur, hi))
+    return [[p, c, q, c] if horiz else [c, p, c, q] for p, q in out]
+
+def build(r, floor=0):
     W, D, F = r.get("plot_w", 30), r.get("plot_d", 40), r.get("floors", 1)
     x0, y0, Wb, Db = 3.5, 4.0, W - 7, D - 10
     port = Db >= Wb
@@ -60,8 +109,9 @@ def svg(r, floor=0):
             pk = next((g for g in gs if "Parking" in g), None)
             if pk: gs.remove(pk); outdoor = True
             else: break
+    st, notes, sc = optimize(gs, r, Lb, st)
     px = lambda p: (p[0] * S, p[1] * S)
-    out = []
+    out = []; dg = []; wg = []; rr = []
     def line(a, b, w=1, c="#111", extra=""):
         a, b = px(a), px(b); out.append(f'<line x1="{a[0]:.1f}" y1="{a[1]:.1f}" x2="{b[0]:.1f}" y2="{b[1]:.1f}" stroke="{c}" stroke-width="{w}" {extra}/>')
     def text(p, s, size=11, c="#111", weight="400"):
@@ -85,7 +135,7 @@ def svg(r, floor=0):
         rect(a, b, 2.5, "#fff", 'stroke-dasharray="5 3"' if n == "Parking" else "")
         c = P(u + l / 2, v0 + wl / 2)
         lab = "Living / Dining" if (n == "Living" and merged) else ("Car Porch" if n == "Parking" else n)
-        text((c[0], c[1] - .2), lab, 11, weight="600"); text((c[0], c[1] + 1.2), f"{wl:.0f}' x {l:.0f}'", 9, "#666")
+        rr.append((lab, a, b)); text((c[0], c[1] - .2), lab, 11, weight="600"); text((c[0], c[1] + 1.2), f"{wl:.0f}' x {l:.0f}'", 9, "#666")
         if n == "Stairs":
             for i in range(1, int(l)): line(P(u + i, v0), P(u + i, v0 + wl), .8, "#555")
             text(P(u + l / 2, v0 + wl / 2 + 2.4), "UP" if floor == 0 and F == 2 else ("DN" if F == 2 else ""), 10, "#c00", "700")
@@ -94,17 +144,17 @@ def svg(r, floor=0):
     def gap(a, b, w=9): line(a, b, w, "#fff")
     def door(h, t, n, w=3):
         a = (h[0] + t[0] * w, h[1] + t[1] * w); b = (h[0] + n[0] * w, h[1] + n[1] * w)
-        gap(h, a, 6); line(h, b, 1.6)
+        gap(h, a, 6); dg.append((h, a)); line(h, b, 1.6)
         sw = 1 if t[0] * n[1] - t[1] * n[0] > 0 else 0
         pa, pb = px(a), px(b); out.append(f'<path d="M{pa[0]:.1f},{pa[1]:.1f} A{w*S},{w*S} 0 0 {sw} {pb[0]:.1f},{pb[1]:.1f}" fill="none" stroke="#111" stroke-width="1"/>')
     def win(c, t, l):
         a = (c[0] - t[0] * l / 2, c[1] - t[1] * l / 2); b = (c[0] + t[0] * l / 2, c[1] + t[1] * l / 2); n = (-t[1], t[0])
-        gap(a, b, 9)
+        gap(a, b, 9); wg.append((a, b))
         for o in (-.22, 0, .22): line((a[0] + n[0] * o, a[1] + n[1] * o), (b[0] + n[0] * o, b[1] + n[1] * o), 1)
     for n, k, u, l in rooms:
         if n in ("Parking", "Stairs"): continue
         vw = wl if k == "W" else wl + CW; into = -1 if k == "W" else 1; uc = u + l / 2
-        if n in OPEN: gap(P(uc - 2.5, vw), P(uc + 2.5, vw), 6)
+        if n in OPEN: dg.append((P(uc - 2.5, vw), P(uc + 2.5, vw))); gap(P(uc - 2.5, vw), P(uc + 2.5, vw), 6)
         else: door(P(uc - 1.5, vw), vec(1, 0), vec(0, into))
         wl_len = min(4.5, l * .5) if n != "Bath" else 2
         win(P(uc, 0 if k == "W" else Tb), vec(1, 0), wl_len)
@@ -119,6 +169,17 @@ def svg(r, floor=0):
             f'<text x="{pad}" y="30" font-size="17" font-weight="700" fill="#111">{title} <tspan font-size="11" font-weight="400" fill="#666">({W} x {D} ft plot)</tspan></text>'
             f'<g stroke="#c00" fill="#c00"><path d="M{Wp-pad-6},{top-8} l6,-18 l6,18 z"/></g><text x="{Wp-pad}" y="{top+6}" text-anchor="middle" font-size="12" font-weight="700" fill="#c00">N</text>'
             f'<g transform="translate({pad},{top})">')
-    return head + "".join(out) + "</g></svg>"
+    segs = set()
+    def add(p, q): segs.add(tuple(sorted([(round(p[0], 1), round(p[1], 1)), (round(q[0], 1), round(q[1], 1))])))
+    for _, p, q in rr + [("", P(0, 0), P(Lb, Tb))]:
+        for e in (((p[0], p[1]), (q[0], p[1])), ((q[0], p[1]), (q[0], q[1])), ((q[0], q[1]), (p[0], q[1])), ((p[0], q[1]), (p[0], p[1]))): add(*e)
+    geo = {"W": W, "D": D, "score": sc, "notes": notes,
+           "rooms": [{"n": n, "x": min(p[0], q[0]), "y": min(p[1], q[1]), "w": abs(p[0] - q[0]), "h": abs(p[1] - q[1])} for n, p, q in rr],
+           "walls": [w for s in segs for w in seg_minus(s, dg)], "windows": [[a[0], a[1], b[0], b[1]] for a, b in wg]}
+    return head + "".join(out) + "</g></svg>", geo
+
+def svg(r, floor=0): return build(r, floor)[0]
+def all_geo(r): return [build(r, f)[1] for f in range(r.get("floors", 1))]
+
 
 def all_floors(r): return [svg(r, f) for f in range(r.get("floors", 1))]

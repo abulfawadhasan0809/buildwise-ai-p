@@ -1,7 +1,7 @@
 import os, uuid
 from dotenv import load_dotenv
 load_dotenv()
-from fastapi import FastAPI, UploadFile, File, HTTPException, Request
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Form
 from collections import defaultdict
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
@@ -31,10 +31,12 @@ def check_quota(request: Request):
 class GenReq(BaseModel):
     text: str
     project_id: str | None = None
+    lang: str = "en-IN"
 
 class UpdReq(BaseModel):
     project_id: str
     text: str
+    lang: str = "en-IN"
 
 class CostReq(BaseModel):
     requirements: dict
@@ -44,13 +46,15 @@ class IdReq(BaseModel):
 
 class ExplainReq(BaseModel):
     text: str
+    lang: str = "en-IN"
 
-def build(pid, r):
+def build(pid, r, lang="en-IN"):
     c = agents.cost(r)
     p = {"id": pid, "requirements": r, "floor_plans": floorplan.all_floors(r), "cost": c,
          "timeline": agents.timeline(r), "sustainability": agents.sustainability(r),
-         "interior": agents.interior(r), "utilities": agents.utilities(r)}
-    p["explanation"] = agents.llm_explanation(r, c, agents.explanation(r, c))
+         "interior": agents.interior(r), "utilities": agents.utilities(r),
+         "geo": floorplan.all_geo(r), "lang": lang}
+    p["explanation"] = agents.llm_explanation(r, c, agents.explanation(r, c, lang), lang)
     PROJECTS[pid] = p
     return p
 
@@ -61,29 +65,29 @@ def health(): return {"ok": True, "gnani_configured": gnani.configured()}
 def root(): return {"name": "BuildWise AI API", "docs": "/docs", "health": "/api/health"}
 
 @app.post("/api/voice/transcribe")
-async def transcribe(request: Request, file: UploadFile = File(...)):
+async def transcribe(request: Request, file: UploadFile = File(...), lang: str = Form("en-IN")):
     check_quota(request)
     if not gnani.configured(): raise HTTPException(503, "Gnani not configured; set GNANI_API_KEY")
     try:
-        return {"transcript": await gnani.transcribe(await file.read(), file.filename or "audio.webm", file.content_type or "audio/webm")}
+        return {"transcript": await gnani.transcribe(await file.read(), file.filename or "audio.webm", file.content_type or "audio/webm", lang)}
     except Exception as e:
         raise HTTPException(502, f"Gnani Prisma error: {e}")
 
 @app.post("/api/design/generate")
 def generate(req: GenReq):
     prev = PROJECTS.get(req.project_id, {}).get("requirements") if req.project_id else None
-    r = extract(req.text, prev); q = follow_up(r)
+    r = extract(req.text, prev); q = follow_up(r, req.lang)
     pid = req.project_id or uuid.uuid4().hex[:10]
     if q:
         PROJECTS.setdefault(pid, {"id": pid})["requirements"] = r
         return {"project_id": pid, "needs_more_info": True, "question": q, "requirements": r}
-    return {"project_id": pid, "needs_more_info": False, "project": build(pid, r)}
+    return {"project_id": pid, "needs_more_info": False, "project": build(pid, r, req.lang)}
 
 @app.post("/api/design/update")
 def update(req: UpdReq):
     if req.project_id not in PROJECTS: raise HTTPException(404, "Unknown project")
     r = extract(req.text, PROJECTS[req.project_id]["requirements"])
-    return {"project": build(req.project_id, r)}
+    return {"project": build(req.project_id, r, req.lang)}
 
 @app.post("/api/cost/estimate")
 def estimate(req: CostReq): return agents.cost(req.requirements)
@@ -99,7 +103,7 @@ async def explain(request: Request, req: ExplainReq):
     check_quota(request)
     if not gnani.configured(): raise HTTPException(503, "Gnani not configured")
     try:
-        audio, ct = await gnani.synthesize(req.text)
+        audio, ct = await gnani.synthesize(req.text, req.lang)
         return Response(audio, media_type=ct)
     except Exception as e:
         raise HTTPException(502, f"Gnani Timbre error: {e}")

@@ -1,6 +1,9 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { API, generate, update, health, transcribe, speak } from "@/lib/api";
+const Walk = dynamic(() => import("./Walkthrough3D"), { ssr: false });
+const LANGS: [string, string][] = [["en-IN", "English"], ["hi-IN", "हिन्दी Hindi"], ["te-IN", "తెలుగు Telugu"], ["ta-IN", "தமிழ் Tamil"], ["kn-IN", "ಕನ್ನಡ Kannada"], ["ml-IN", "മലയാളം Malayalam"], ["mr-IN", "मराठी Marathi"], ["bn-IN", "বাংলা Bengali"], ["gu-IN", "ગુજરાતી Gujarati"], ["pa-IN", "ਪੰਜਾਬੀ Punjabi"]];
 
 const lakh = (n: number) => `₹${(n / 1e5).toFixed(1)} lakh`;
 
@@ -14,6 +17,8 @@ export default function Home() {
   const [floor, setFloor] = useState(0);
   const [err, setErr] = useState("");
   const [gnani, setGnani] = useState(false);
+  const [lang, setLang] = useState("en-IN");
+  const [view, setView] = useState("plan");
   const rec = useRef<MediaRecorder | null>(null);
   const sr = useRef<any>(null);
   const chunks = useRef<Blob[]>([]);
@@ -28,14 +33,14 @@ export default function Home() {
       m.ondataavailable = e => chunks.current.push(e.data);
       m.onstop = async () => {
         s.getTracks().forEach(t => t.stop()); setBusy(true);
-        try { setText(t => (t + " " + "").trim()); const tr = await transcribe(new Blob(chunks.current, { type: "audio/webm" })); setText(t => (t + " " + tr).trim()); }
+        try { setText(t => (t + " " + "").trim()); const tr = await transcribe(new Blob(chunks.current, { type: "audio/webm" }), lang); setText(t => (t + " " + tr).trim()); }
         catch (e: any) { setErr(e.message); if (String(e.message).includes("limit")) setGnani(false); } finally { setBusy(false); }
       };
       m.start(); rec.current = m;
     } else { // Browser fallback when no Gnani key is set
       const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
       if (!SR) { setErr("Voice not supported in this browser. Type instead, or add a Gnani key."); return; }
-      const r = new SR(); r.lang = "en-IN"; r.interimResults = true; r.continuous = true;
+      const r = new SR(); r.lang = lang; r.interimResults = true; r.continuous = true;
       r.onresult = (e: any) => setText(Array.from(e.results).map((x: any) => x[0].transcript).join(" "));
       r.onend = () => setListening(false); r.start(); sr.current = r;
     }
@@ -47,9 +52,9 @@ export default function Home() {
     if (!text.trim()) return;
     setBusy(true); setErr("");
     try {
-      const res = proj ? await update(proj.id, text) : await generate(text, pid);
-      if (res.needs_more_info) { setPid(res.project_id); setQuestion(res.question); speak(res.question, false); setText(""); }
-      else { const p = res.project; setProj(p); setPid(p.id); setQuestion(null); setFloor(0); setText(""); speak(p.explanation, gnani); }
+      const res = proj ? await update(proj.id, text, lang) : await generate(text, pid, lang);
+      if (res.needs_more_info) { setPid(res.project_id); setQuestion(res.question); speak(res.question, false, lang); setText(""); }
+      else { const p = res.project; setProj(p); setPid(p.id); setQuestion(null); setFloor(0); setText(""); speak(p.explanation, gnani, lang); }
     } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
   }
 
@@ -60,6 +65,8 @@ export default function Home() {
         <h1 className="text-4xl font-extrabold leading-none tracking-tight">BuildWise AI</h1>
         <p className="text-lg">Describe your plot, budget and rooms out loud. You get a floor plan, cost and schedule.</p>
         <div className="sheet space-y-3 p-4">
+          <select value={lang} onChange={e => setLang(e.target.value)} aria-label="Language" className="w-full border-2 border-ink bg-white p-2">
+            {LANGS.map(([c, n]) => <option key={c} value={c}>{n}</option>)}</select>
           {question && <p className="rounded bg-plumb/40 p-3 font-medium" role="status">{question}</p>}
           <button onClick={listening ? stopMic : startMic} aria-pressed={listening}
             className={`mic ${listening ? "live" : ""} mx-auto flex h-24 w-24 items-center justify-center rounded-full border-2 border-ink bg-plumb text-4xl`}
@@ -87,13 +94,15 @@ export default function Home() {
                     <button key={i} onClick={() => setFloor(i)} className={`border-2 border-ink px-3 py-1 ${floor === i ? "bg-plumb" : "bg-white"}`}>Floor {i + 1}</button>))}
                 </div>
               </div>
-              <div className="mx-auto max-w-2xl" dangerouslySetInnerHTML={{ __html: proj.floor_plans[floor] }} />
+              <div className="mb-2 flex gap-2">{[["plan", "2D plan"], ["3d", "3D walkthrough"]].map(([k, n]) => <button key={k} onClick={() => setView(k)} className={`border-2 border-ink px-3 py-1 ${view === k ? "bg-plumb" : "bg-white"}`}>{n}</button>)}</div>
+              {view === "plan" ? <div className="mx-auto max-w-2xl" dangerouslySetInnerHTML={{ __html: proj.floor_plans[floor] }} /> : <Walk floors={proj.geo} />}
+              {proj.geo?.[floor]?.notes?.length > 0 && <p className="mt-2 text-sm"><b>Layout score {proj.geo[floor].score}/100.</b> {proj.geo[floor].notes.join(". ")}.</p>}
             </div>
 
             <div className="sheet p-4">
               <h3 className="text-xl font-bold">Explanation</h3>
               <p className="mt-1 max-w-prose">{proj.explanation}</p>
-              <button onClick={() => speak(proj.explanation, gnani)} className="mt-3 border-2 border-ink bg-plumb px-3 py-1 font-bold">🔊 Play explanation</button>
+              <button onClick={() => speak(proj.explanation, gnani, lang)} className="mt-3 border-2 border-ink bg-plumb px-3 py-1 font-bold">🔊 Play explanation</button>
             </div>
 
             <div className="grid gap-6 lg:grid-cols-2">
@@ -103,6 +112,8 @@ export default function Home() {
                   {Object.entries(proj.cost.items).map(([k, v]: any) => <tr key={k} className="border-b border-rule"><td className="py-1">{k}</td><td className="text-right">{lakh(v)}</td></tr>)}
                   <tr className="font-bold"><td className="py-2">Total</td><td className="text-right">{lakh(proj.cost.total)}</td></tr>
                 </tbody></table>
+                <p className="mt-1 text-sm">Likely range: <b>{lakh(proj.cost.low)} to {lakh(proj.cost.high)}</b> ({proj.cost.tier} finish, about ₹{proj.cost.rate_per_sqft.toLocaleString("en-IN")}/sq ft)</p>
+                {proj.cost.suggestions?.length > 0 && <ul className="mt-1 list-disc pl-5 text-sm">{proj.cost.suggestions.map((s: string) => <li key={s}>{s}</li>)}</ul>}
                 {proj.cost.budget && <p className="mt-1 text-sm font-medium">{proj.cost.within_budget ? "Within" : "Over"} your {lakh(proj.cost.budget)} budget.</p>}
                 <p className="mt-1 text-xs">{proj.cost.note}</p>
               </div>

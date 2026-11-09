@@ -5,8 +5,8 @@ async function j(path: string, body?: any) {
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
   return r.json();
 }
-export const generate = (text: string, project_id?: string) => j("/api/design/generate", { text, project_id });
-export const update = (project_id: string, text: string) => j("/api/design/update", { project_id, text });
+export const generate = (text: string, project_id?: string, lang = "en-IN") => j("/api/design/generate", { text, project_id, lang });
+export const update = (project_id: string, text: string, lang = "en-IN") => j("/api/design/update", { project_id, text, lang });
 export const health = () => j("/api/health");
 // Gnani accepts WAV/MP3/OGG etc. but not webm, so convert the recording to 16 kHz mono WAV.
 async function toWav(blob: Blob): Promise<Blob> {
@@ -25,18 +25,18 @@ async function toWav(blob: Blob): Promise<Blob> {
   ctx.close();
   return new Blob([out], { type: "audio/wav" });
 }
-export async function transcribe(blob: Blob): Promise<string> {
-  const fd = new FormData(); fd.append("file", await toWav(blob), "speech.wav");
+export async function transcribe(blob: Blob, lang = "en-IN"): Promise<string> {
+  const fd = new FormData(); fd.append("file", await toWav(blob), "speech.wav"); fd.append("lang", lang);
   const r = await fetch(B + "/api/voice/transcribe", { method: "POST", body: fd });
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || "Transcription failed");
   return (await r.json()).transcript;
 }
-export async function speak(text: string, useGnani: boolean) {
+export async function speak(text: string, useGnani: boolean, lang = "en-IN") {
   if (useGnani) {
     try {
-      const r = await fetch(B + "/api/voice/explain", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
+      const r = await fetch(B + "/api/voice/explain", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, lang }) });
       if (r.ok) { const a = new Audio(URL.createObjectURL(await r.blob())); await a.play(); return; }
     } catch {}
   }
-  window.speechSynthesis?.speak(new SpeechSynthesisUtterance(text)); // browser fallback
+  const u = new SpeechSynthesisUtterance(text); u.lang = lang; window.speechSynthesis?.speak(u); // browser fallback
 }

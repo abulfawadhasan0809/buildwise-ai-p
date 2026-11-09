@@ -12,20 +12,22 @@ TTS_MODEL = lambda: os.getenv("GNANI_TTS_MODEL", "timbre-v2.5")
 def configured() -> bool:
     return bool(KEY() and KEY() != "your_api_key")
 
-async def transcribe(audio: bytes, filename: str, content_type: str) -> str:
+async def transcribe(audio: bytes, filename: str, content_type: str, lang: str | None = None) -> str:
     async with httpx.AsyncClient(timeout=60) as c:
         r = await c.post(STT(), headers={"X-API-Key-ID": KEY()},
                          files={"audio_file": (filename, audio, content_type)},
-                         data={"language_code": LANG()})
+                         data={"language_code": lang or LANG()})
         if r.status_code >= 400:
             raise RuntimeError(f"{r.status_code} {r.text[:200]}")
         j = r.json()
         return j.get("transcript", "")
 
-async def synthesize(text: str) -> tuple[bytes, str]:
+async def synthesize(text: str, lang: str | None = None) -> tuple[bytes, str]:
+    lang = lang or LANG()
+    voice = os.getenv('GNANI_VOICE_' + lang[:2].upper()) or VOICE()  # set GNANI_VOICE_HI etc. to a voice for that language
     async with httpx.AsyncClient(timeout=60) as c:
         r = await c.post(TTS(), headers={"X-API-Key-ID": KEY(), "Content-Type": "application/json"},
-                         json={"text": text, "voice": VOICE(), "model": TTS_MODEL(), "language": LANG(), "speed": 1.0,
+                         json={"text": text, "voice": voice, "model": TTS_MODEL(), "language": lang, "speed": 1.0,
                                "audio_config": {"sample_rate": 24000, "num_channels": 1, "sample_width": 2,
                                                 "encoding": "linear_pcm", "container": "wav"}})
         if r.status_code >= 400:

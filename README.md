@@ -39,3 +39,9 @@ POST /api/voice/transcribe, /api/design/generate, /api/design/update, /api/cost/
 
 ## Demo
 Say: "I have a 30 by 40 plot in Hyderabad with a 60 lakh budget. I need a modern 3 BHK house with a study room, open kitchen, garden and parking." Answer yes to the Vastu question.
+
+## New in this version
+- **Better cost predictions:** city factor, finish tier (basic/standard/premium, say "luxury" or "budget friendly"), compound wall, approvals and 7% contingency, a likely range (-10% to +15%) and savings tips when over budget.
+- **Smarter room optimization:** the layout engine tries 250 arrangements and picks the best by a score (kitchen next to dining, living near entrance, bath next to bedrooms, Vastu placement, balance).
+- **Indian languages:** pick a language (10 offered). Speech input uses Gnani Prisma with that language code. Spoken explanations and follow-up questions are written for Hindi, Telugu, Tamil and Kannada; other languages get English text (or LLM translation if `OPENAI_API_KEY` is set). Set `GNANI_VOICE_HI`, `GNANI_VOICE_TE`, etc. to a voice for that language.
+- **3D walkthrough:** orbit around the house or walk inside with WASD (React Three Fiber). Run `npm install` in `frontend` for the new packages.
