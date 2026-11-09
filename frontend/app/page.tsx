@@ -27,6 +27,7 @@ export default function Home() {
 
   async function startMic() {
     setErr("");
+    try {
     if (gnani) { // Gnani Prisma path: record audio, send to backend
       const s = await navigator.mediaDevices.getUserMedia({ audio: true });
       const m = new MediaRecorder(s); chunks.current = [];
@@ -42,9 +43,14 @@ export default function Home() {
       if (!SR) { setErr("Voice not supported in this browser. Type instead, or add a Gnani key."); return; }
       const r = new SR(); r.lang = lang; r.interimResults = true; r.continuous = true;
       r.onresult = (e: any) => setText(Array.from(e.results).map((x: any) => x[0].transcript).join(" "));
+      r.onerror = (e: any) => { setListening(false); setErr(e.error === "not-allowed" ? "Microphone blocked. Click the lock icon in the address bar, allow the microphone, and reload." : "Voice error: " + e.error + ". You can type instead."); };
       r.onend = () => setListening(false); r.start(); sr.current = r;
     }
     setListening(true);
+    } catch (e: any) {
+      setListening(false);
+      setErr(e?.name === "NotAllowedError" ? "Microphone blocked. Click the lock icon in the address bar, allow the microphone, and reload." : e?.name === "NotFoundError" ? "No microphone found on this device." : "Could not start the microphone: " + (e?.message || e));
+    }
   }
   function stopMic() { rec.current?.stop(); sr.current?.stop(); setListening(false); }
 
